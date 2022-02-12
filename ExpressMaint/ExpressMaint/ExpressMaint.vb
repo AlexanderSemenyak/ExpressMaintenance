@@ -79,7 +79,7 @@ Module ExpressMaint
                         "[-U] " & vbTab & "SQL Server Login" & vbCrLf &
                         "[-P] " & vbTab & "SQL Server Password" & vbCrLf &
                         "[-D] " & vbTab & "Database Name or " & ALL_USER & "," & ALL_SYSTEM & "," & ALL & vbCrLf &
-                        "[-T] " & vbTab & "Type of operation. Can be DB,DIF,LOG,CHECKDB,REORG,REINDEX,STATS,STATSFULL" & vbCrLf &
+                        "[-T] " & vbTab & "Type of operation. Can be DB,DIF,LOG,CHECKDB,REORG,REINDEX,REINDEX_SKIPSPARSE,STATS,STATSFULL" & vbCrLf &
                         "[-B] " & vbTab & "Base backup folder path" & vbCrLf &
                         "[-R] " & vbTab & "Report folder path" & vbCrLf &
                         "[-BU]" & vbTab & "Backup retention time unit. Can be MINUTES,HOURS,DAYS,WEEKS" & vbCrLf &
@@ -179,7 +179,7 @@ Module ExpressMaint
                         WriteToFile("Starting backup on " & Now.ToString & vbCrLf & vbCrLf, rfile)
                     Case "CHECKDB"
                         WriteToFile("Starting CheckDB on " & Now.ToString & vbCrLf & vbCrLf, rfile)
-                    Case "REINDEX", "REORG"
+                    Case "REINDEX", "REORG", "REINDEX_SKIPSPARSE"
                         WriteToFile("Starting Reindex on " & Now.ToString & vbCrLf & vbCrLf, rfile)
                     Case "STATS", "STATSFULL"
                         WriteToFile("Starting Statistics Update on " & Now.ToString & vbCrLf & vbCrLf, rfile)
@@ -297,7 +297,7 @@ Module ExpressMaint
             End Try
         End If
 
-        If pOptype = "REINDEX" Or pOptype = "REORG" Then
+        If pOptype = "REINDEX" Or pOptype = "REORG" Or pOptype = "REINDEX_SKIPSPARSE"  Then
             Try
                 DoReindex()
                 If bReport Then
@@ -947,19 +947,22 @@ Module ExpressMaint
 
             For i As Integer = 0 To foundRows.GetUpperBound(0)
                 start = Now()
+                Dim dbName as string = foundRows(i)(0).ToString
                 If bReport Then
                     Select Case pOptype
                         Case "REINDEX"
-                            WriteToFile("[" & CStr(stage) & "] Database " & foundRows(i)(0).ToString & ": Index Rebuild (using original fillfactor)..." & vbCrLf & vbCrLf, rfile)
+                            WriteToFile("[" & CStr(stage) & "] Database " & dbName & ": Index Rebuild (using original fillfactor)..." & vbCrLf & vbCrLf, rfile)
+                        Case "REINDEX_SKIPSPARSE"
+                            WriteToFile("[" & CStr(stage) & "] Database " & dbName & ": Index Rebuild (using original fillfactor, SKIP SPARSE COLUMNS)..." & vbCrLf & vbCrLf, rfile)
                         Case "REORG"
-                            WriteToFile("[" & CStr(stage) & "] Database " & foundRows(i)(0).ToString & ": Index Reorganize..." & vbCrLf & vbCrLf, rfile)
+                            WriteToFile("[" & CStr(stage) & "] Database " & dbName & ": Index Reorganize..." & vbCrLf & vbCrLf, rfile)
                     End Select
                 End If
                 Dim db As Database
 
                 Try
-                    db = srv.Databases(foundRows(i)(0).ToString)
-                    If pOptype = "REINDEX" Then
+                    db = srv.Databases(dbName)
+                    If pOptype = "REINDEX" or pOptype="REINDEX_SKIPSPARSE" Then
                         For Each t As Table In db.Tables
                             If t.HasIndex And HasDisabledClusteredIndex(t) = False Then
                                 If bReport Then
@@ -967,6 +970,10 @@ Module ExpressMaint
                                 End If
                                 For Each ind As Index In t.Indexes
                                     If Not ind.IsDisabled Then
+                                        if ind.HasSparseColumn And String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
+                                            WriteToFile("      Skip columnstore index [" & ind.Name & "]" & vbCrLf, rfile)
+                                            Continue For
+                                        End If
                                         ind.Rebuild()
                                     End If
                                 Next
@@ -1008,12 +1015,14 @@ Module ExpressMaint
                 Select Case pOptype
                     Case "REINDEX"
                         WriteToFile("[" & CStr(stage) & "] Database " & pDatabase & ": Index Rebuild (using original fillfactor)..." & vbCrLf & vbCrLf, rfile)
+                    Case "REINDEX_SKIPSPARSE"
+                        WriteToFile("[" & CStr(stage) & "] Database " & pDatabase & ": Index Rebuild (using original fillfactor, SKIP SPARSE COLUMNS)..." & vbCrLf & vbCrLf, rfile)
                     Case "REORG"
                         WriteToFile("[" & CStr(stage) & "] Database " & pDatabase & ": Index Reorganize..." & vbCrLf & vbCrLf, rfile)
                 End Select
             End If
 
-            If pOptype = "REINDEX" Then
+            If pOptype = "REINDEX" or pOptype="REINDEX_SKIPSPARSE" Then
                 For Each t As Table In db.Tables
                     If t.HasIndex And HasDisabledClusteredIndex(t) = False Then
                         If bReport Then
@@ -1021,6 +1030,10 @@ Module ExpressMaint
                         End If
                         For Each ind As Index In t.Indexes
                             If Not ind.IsDisabled Then
+                                if ind.HasSparseColumn And String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
+                                    WriteToFile("      Skip columnstore index [" & ind.Name & "]" & vbCrLf, rfile)
+                                    Continue For
+                                End If
                                 ind.Rebuild()
                             End If
                         Next
@@ -1420,7 +1433,7 @@ Module ExpressMaint
                 Return False
             End If
 
-            If pOptype <> "DB" And pOptype <> "DIF" And pOptype <> "LOG" And pOptype <> "REINDEX" And pOptype <> "REORG" And pOptype <> "CHECKDB" And pOptype <> "STATS" And pOptype <> "STATSFULL" Then
+            If pOptype <> "DB" And pOptype <> "DIF" And pOptype <> "LOG" And pOptype <> "REINDEX" And pOptype <> "REINDEX_SKIPSPARSE" And pOptype <> "REORG" And pOptype <> "CHECKDB" And pOptype <> "STATS" And pOptype <> "STATSFULL" Then
                 ShowMessage(vbCrLf & pOptype & " is an invalid value for switch -T")
                 Return False
             End If
@@ -1494,6 +1507,7 @@ Module ExpressMaint
                 FileFromOptype = "CheckDB"
                 Exit Select
             Case "REINDEX"
+            Case "REINDEX_SKIPSPARSE"
                 FileFromOptype = "Reindex"
                 Exit Select
             Case "REORG"
