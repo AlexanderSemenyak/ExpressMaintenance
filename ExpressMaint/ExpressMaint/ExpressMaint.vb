@@ -964,16 +964,20 @@ Module ExpressMaint
                     db = srv.Databases(dbName)
                     If pOptype = "REINDEX" or pOptype="REINDEX_SKIPSPARSE" Then
                         For Each t As Table In db.Tables
+                            If t.HasClusteredColumnStoreIndex Then 
+                                if String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
+                                    if (bReport) Then 
+                                       WriteToFile("      Skip columnstore index [" & t.Name & "]" & vbCrLf, rfile)
+                                    end if
+                                    Continue For
+                                End If
+                            End If
                             If t.HasIndex And HasDisabledClusteredIndex(t) = False Then
                                 If bReport Then
                                     WriteToFile("    Rebuilding indexes for table [" & t.Schema & "].[" & t.Name & "]" & vbCrLf, rfile)
                                 End If
                                 For Each ind As Index In t.Indexes
                                     If Not ind.IsDisabled Then
-                                        if ind.HasSparseColumn And String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
-                                            WriteToFile("      Skip columnstore index [" & ind.Name & "]" & vbCrLf, rfile)
-                                            Continue For
-                                        End If
                                         ind.Rebuild()
                                     End If
                                 Next
@@ -1024,16 +1028,20 @@ Module ExpressMaint
 
             If pOptype = "REINDEX" or pOptype="REINDEX_SKIPSPARSE" Then
                 For Each t As Table In db.Tables
+                    If t.HasClusteredColumnStoreIndex Then 
+                        if String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
+                            if (bReport) Then 
+                                WriteToFile("      Skip columnstore index [" & t.Name & "]" & vbCrLf, rfile)
+                            end if
+                            Continue For
+                        End If
+                    End If
                     If t.HasIndex And HasDisabledClusteredIndex(t) = False Then
                         If bReport Then
                             WriteToFile("    Rebuilding indexes for table [" & t.Schema & "].[" & t.Name & "]" & vbCrLf, rfile)
                         End If
                         For Each ind As Index In t.Indexes
                             If Not ind.IsDisabled Then
-                                if ind.HasSparseColumn And String.Equals(pOptype, "REINDEX_SKIPSPARSE") Then
-                                    WriteToFile("      Skip columnstore index [" & ind.Name & "]" & vbCrLf, rfile)
-                                    Continue For
-                                End If
                                 ind.Rebuild()
                             End If
                         Next
